@@ -1,8 +1,6 @@
-import { useMemo, useState, type ReactElement, type ReactNode } from "react";
+import { useMemo, type ReactElement, type ReactNode } from "react";
 import {
   CONTEXT,
-  EMBEDDINGS,
-  POSITIONAL,
   UNEMBED,
   VOCAB,
   D_K,
@@ -10,9 +8,10 @@ import {
   forward,
   fmt,
   fmtSmart,
-  layerNorm,
-  type Word,
 } from "./model";
+import type { Guide } from "./lessons";
+import { NormSteps } from "./NormSteps";
+import { TokenPlayground } from "./TokenPlayground";
 
 export type LessonProps = {
   token: number;
@@ -21,6 +20,9 @@ export type LessonProps = {
   setGuess: (value: string) => void;
   go: (id: string) => void;
   pipe?: string;
+  guideStep: number;
+  setGuide: (guide: Guide | null, keepStep?: boolean) => void;
+  setGuideStep: (step: number) => void;
 };
 
 const PEN = ["#e23b3b", "#2f6bff", "#1aa36a", "#7a3ff0"];
@@ -28,9 +30,8 @@ const PEN = ["#e23b3b", "#2f6bff", "#1aa36a", "#7a3ff0"];
 export const STAGES: Record<string, (props: LessonProps) => ReactElement> = {
   problem: Problem,
   map: Map,
-  tokens: Tokens,
-  embed: Embed,
-  norm: Norm,
+  tokens: TokenPlayground,
+  norm: NormSteps,
   qkv: Qkv,
   scores: Scores,
   softmax: SoftmaxStage,
@@ -87,7 +88,7 @@ function Pipeline({
   const f = useMemo(() => forward(token), [token]);
   const stages = [
     { id: "tokens", label: "Tokens" },
-    { id: "embed", label: "E+P" },
+    { id: "embed", label: "Embed" },
     { id: "norm", label: "LN" },
     { id: "qkv", label: "QKV" },
     { id: "attn", label: "Attn" },
@@ -212,176 +213,6 @@ function Map({ pipe = "attn" }: LessonProps) {
       <p className="eq">
         block: x ← x + Attn(LN(x)); &nbsp; x ← x + MLP(LN(x)); &nbsp; then Ux → softmax
       </p>
-    </Pipeline>
-  );
-}
-
-function Tokens({ pipe = "tokens" }: LessonProps) {
-  const [split, setSplit] = useState(false);
-  const [pieces, setPieces] = useState(false);
-  return (
-    <Pipeline active={pipe}>
-      <div className="stack">
-        <div className="row">
-          {!split ? (
-            <p className="raw">the cat sat on</p>
-          ) : (
-            CONTEXT.map((word, i) => (
-              <span key={word} className="chip" style={{ borderColor: PEN[i] }}>
-                id {i}: {word}
-              </span>
-            ))
-          )}
-          <button type="button" onClick={() => setSplit(true)} disabled={split}>
-            {split ? "T = 4" : "Tokenize"}
-          </button>
-        </div>
-        <div className="row">
-          {!pieces ? (
-            <p className="raw small">unbelievable</p>
-          ) : (
-            ["un", "believ", "able"].map((part) => (
-              <span key={part} className="chip">
-                {part}
-              </span>
-            ))
-          )}
-          <button type="button" onClick={() => setPieces(true)} disabled={pieces}>
-            BPE-style split
-          </button>
-        </div>
-      </div>
-    </Pipeline>
-  );
-}
-
-function Embed({ pipe = "embed" }: LessonProps) {
-  const [word, setWord] = useState<Word>("cat");
-  const pos = CONTEXT.indexOf(word as (typeof CONTEXT)[number]);
-  const hasPos = pos >= 0;
-  return (
-    <Pipeline active={pipe}>
-      <div className="stack">
-        <div className="picker">
-          {VOCAB.map((item) => (
-            <button
-              key={item}
-              type="button"
-              className="chip button"
-              aria-pressed={word === item}
-              onClick={() => setWord(item)}
-            >
-              {item}
-            </button>
-          ))}
-        </div>
-        <div className="matrix-scroll">
-          <table className="matrix">
-            <thead>
-              <tr>
-                <th />
-                {VOCAB.map((item) => (
-                  <th key={item} className={item === word ? "hot" : ""}>
-                    {item}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {[0, 1, 2, 3].map((row) => (
-                <tr key={row}>
-                  <th>d{row + 1}</th>
-                  {VOCAB.map((item) => {
-                    const value = EMBEDDINGS[item][row];
-                    const tone = value < -0.001 ? "neg" : value > 0.001 ? "pos" : "";
-                    return (
-                      <td key={item} className={`${tone} ${item === word ? "hot" : ""}`}>
-                        {fmt(value, 1)}
-                      </td>
-                    );
-                  })}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <p className="readout">
-          E[{word}] <Vec values={EMBEDDINGS[word]} />
-          {hasPos && (
-            <>
-              {" "}
-              + P[{pos}] <Vec values={POSITIONAL[pos]} /> ={" "}
-              <Vec
-                values={EMBEDDINGS[word].map((v, d) =>
-                  Math.round((v + POSITIONAL[pos][d]) * 100) / 100,
-                )}
-              />
-            </>
-          )}
-        </p>
-      </div>
-    </Pipeline>
-  );
-}
-
-function Norm({ pipe = "norm" }: LessonProps) {
-  const [gamma, setGamma] = useState(1);
-  const [beta, setBeta] = useState(0);
-  const worked = useMemo(() => layerNorm([2, 4, 4, 6], gamma, beta), [gamma, beta]);
-  const f = useMemo(() => forward(), []);
-  return (
-    <Pipeline active={pipe}>
-      <div className="stack">
-        <p className="eq">LN(x) = γ ⊙ (x−μ)/√(σ²+ε) + β &nbsp;·&nbsp; over d_model, per token</p>
-        <p className="readout">
-          Demo <Vec values={[2, 4, 4, 6]} /> → <Vec values={worked.scaled} />
-        </p>
-        <ol className="work">
-          <li>
-            <span>μ</span>
-            <b>{fmt(worked.mean)}</b>
-          </li>
-          <li>
-            <span>x−μ</span>
-            <Vec values={worked.centered} />
-          </li>
-          <li>
-            <span>√(σ²+ε)</span>
-            <b>{fmt(worked.std)}</b>
-          </li>
-          <li>
-            <span>LN</span>
-            <Vec values={worked.scaled} />
-          </li>
-        </ol>
-        <div className="sliders">
-          <label>
-            γ {fmt(gamma, 1)}
-            <input
-              type="range"
-              min={0}
-              max={2}
-              step={0.1}
-              value={gamma}
-              onChange={(event) => setGamma(Number(event.target.value))}
-            />
-          </label>
-          <label>
-            β {fmt(beta, 1)}
-            <input
-              type="range"
-              min={-2}
-              max={2}
-              step={0.1}
-              value={beta}
-              onChange={(event) => setBeta(Number(event.target.value))}
-            />
-          </label>
-        </div>
-        <p className="readout">
-          After LN on “on”: <Vec values={f.x[3]} />
-        </p>
-      </div>
     </Pipeline>
   );
 }

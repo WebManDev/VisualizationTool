@@ -6,11 +6,14 @@ export type Question = {
   miss: string;
 };
 
+/** What the explainer box shows; `focus` and `pick` tie a step to the visual. */
+export type GuideStep = { text: string; focus?: string; pick?: number };
+export type Guide = { prompt?: string; steps: GuideStep[] };
+
 export type Lesson = {
   id: string;
   group: string;
   label: string;
-  flow: string | null;
   /** Which stage of the L→R pipeline to highlight in the center viz. */
   pipe: string;
   title: string;
@@ -25,7 +28,6 @@ export const LESSONS: Lesson[] = [
     id: "problem",
     group: "Intro",
     label: "The problem",
-    flow: null,
     pipe: "tokens",
     title: "Autoregressive next-token prediction",
     blurb:
@@ -49,7 +51,6 @@ export const LESSONS: Lesson[] = [
     id: "map",
     group: "Intro",
     label: "The whole model",
-    flow: null,
     pipe: "attn",
     title: "Decoder block, left → right",
     blurb:
@@ -72,15 +73,14 @@ export const LESSONS: Lesson[] = [
   {
     id: "tokens",
     group: "Components",
-    label: "Tokens",
-    flow: "Tokens",
+    label: "Tokens & embeddings",
     pipe: "tokens",
-    title: "Tokenization → discrete IDs",
+    title: "Tokens → IDs → embeddings",
     blurb:
-      "Text is not the network’s input. A tokenizer maps a string to integer IDs. Subword schemes (BPE, WordPiece) split rare words so the vocabulary stays finite. Each ID indexes one row of the embedding matrix.",
-    concept: "Sequence of IDs ∈ {1…|V|}^T — the only discrete step before continuous vectors.",
+      "Text is not the network’s input. A tokenizer maps a string to integer IDs, and subword schemes (BPE, WordPiece) split rare words so the vocabulary stays finite. Each ID then picks one row of the embedding table. That row of numbers is the token’s vector, and it is what the network actually receives.",
+    concept: "text → token IDs → rows of the embedding table (one vector per token)",
     narration:
-      "“the cat sat on” becomes four IDs. “unbelievable” might be three subword IDs. From here on, every tensor is indexed by position in that ID sequence. No string operations remain inside the block.",
+      "“the cat sat on” becomes four IDs. “unbelievable” becomes four subword IDs: un, bel, iev, able. Type your own sentence to see how GPT-2 splits it. Each ID then picks one row of the embedding table, and that row of numbers is what the network receives. From here on, every tensor is indexed by position in that ID sequence. No string operations remain inside the block.",
     question: {
       prompt: "Why use subword tokens instead of only whole words?",
       options: [
@@ -94,41 +94,16 @@ export const LESSONS: Lesson[] = [
     },
   },
   {
-    id: "embed",
-    group: "Components",
-    label: "Embeddings",
-    flow: "Embed",
-    pipe: "embed",
-    title: "Token + positional embeddings",
-    blurb:
-      "Lookup E[id] ∈ ℝ^d gives a token embedding. Add a position vector P[t] (learned here; transformers also use sinusoids or RoPE). The sum is the starting residual stream x⁰_t. Attention has no recurrence — position must be injected.",
-    concept: "x⁰_t = E[token_t] + P[t]   then LayerNorm before attention.",
-    narration:
-      "Click a word to highlight its column in E. Then we add the positional row for that index. Without P, the same word in two places would be identical vectors, and attention could not tell order. Real models use d ≈ 768–4096 and |V| ≈ 50k; we keep d=4 so you can see the arithmetic.",
-    question: {
-      prompt: "Why add positional encodings at all?",
-      options: [
-        { id: "order", label: "Self-attention is permutation-equivariant without them" },
-        { id: "softmax", label: "Softmax needs them numerically" },
-        { id: "gpu", label: "GPUs require them" },
-      ],
-      correct: "order",
-      reply: "Without position, reordering tokens would not change attention’s view of the set.",
-      miss: "Attention on a bag of vectors has no inherent order — P supplies it.",
-    },
-  },
-  {
     id: "norm",
     group: "Components",
     label: "Layer norm",
-    flow: "Norm",
     pipe: "norm",
     title: "LayerNorm on the residual stream",
     blurb:
-      "LayerNorm(x) = γ ⊙ (x − μ) / √(σ²+ε) + β, computed over the feature axis of one token. Unlike batch norm, it does not depend on other batch elements — required for variable-length sequences. Pre-norm (LN before attention/MLP) is the GPT-2/3 style.",
+      "Layer norm tidies up each token’s numbers before attention: subtract their average, divide by their spread, then let two learned dials (γ and β) stretch and shift the result. It works on one token at a time, so it handles any sentence length. GPT-2 applies it before attention and before the MLP.",
     concept: "Per-token mean/variance over d_model — stabilizes the residual stream.",
     narration:
-      "Follow the worked vector 2,4,4,6. Subtract mean 4, divide by √variance. γ and β are affine parameters the model can learn per channel; here one shared pair is enough to see the effect. In the full forward pass, LN is applied to E+P before QKV projections.",
+      "Layer norm tidies one token’s numbers in a few small steps. Find the average, subtract it, measure the spread, divide by it, then stretch and shift with γ and β.",
     question: {
       prompt: "LayerNorm’s statistics are computed…",
       options: [
@@ -145,7 +120,6 @@ export const LESSONS: Lesson[] = [
     id: "qkv",
     group: "Components",
     label: "Self-attention",
-    flow: "Attention",
     pipe: "qkv",
     title: "Q, K, V linear maps",
     blurb:
@@ -169,7 +143,6 @@ export const LESSONS: Lesson[] = [
     id: "scores",
     group: "Components",
     label: "Attention scores",
-    flow: "Attention",
     pipe: "attn",
     title: "Scaled dot-product attention",
     blurb:
@@ -193,7 +166,6 @@ export const LESSONS: Lesson[] = [
     id: "softmax",
     group: "Components",
     label: "Softmax",
-    flow: "Attention",
     pipe: "attn",
     title: "Softmax → attention weights",
     blurb:
@@ -217,7 +189,6 @@ export const LESSONS: Lesson[] = [
     id: "mlp",
     group: "Components",
     label: "The MLP",
-    flow: "MLP",
     pipe: "mlp",
     title: "Position-wise feed-forward + residual",
     blurb:
@@ -241,7 +212,6 @@ export const LESSONS: Lesson[] = [
     id: "output",
     group: "Output",
     label: "The next word",
-    flow: "Output",
     pipe: "out",
     title: "Unembed → logits → softmax",
     blurb:
@@ -261,13 +231,4 @@ export const LESSONS: Lesson[] = [
       miss: "A mixes context earlier; the distribution is always over U h_T.",
     },
   },
-];
-
-export const FLOW = [
-  { key: "Tokens", lesson: "tokens" },
-  { key: "Embed", lesson: "embed" },
-  { key: "Norm", lesson: "norm" },
-  { key: "Attention", lesson: "qkv" },
-  { key: "MLP", lesson: "mlp" },
-  { key: "Output", lesson: "output" },
 ];
