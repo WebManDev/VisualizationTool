@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import type { Tiktoken } from "js-tiktoken/lite";
 import { loadEmbeddings, type Embeddings } from "./embeddings";
 import type { Guide, GuideStep } from "./lessons";
 import type { LessonProps } from "./Stages";
+import { WordReorder } from "./WordReorder";
 
 const SLIDE_SENTENCE = "I love purple cats. Purple cats are great.";
 const PENS = ["#e23b3b", "#2f6bff", "#7a3ff0", "#1aa36a", "#a16207", "#555555"];
@@ -58,6 +59,13 @@ function walkthrough(tokenizer: Tiktoken, ids: number[], rows: number[]): GuideS
     });
   }
 
+  if (pieces.filter((piece) => /\p{L}/u.test(piece)).length > 1) {
+    steps.push({
+      text: "Does a word’s position change its token? Press Reorder words and drag a word to the very front, then move the first word into the middle. Watch which IDs change, and which stay the same.",
+      focus: "reorder",
+    });
+  }
+
   steps.push({
     text: `Each token has an ID, which is its position in GPT-2’s vocabulary of 50,257 tokens. ${show(ids[0])} is ID ${ids[0].toLocaleString()}. The IDs are where the words stop: the model never sees the text itself.`,
     focus: "ids",
@@ -104,11 +112,15 @@ const PROMPT: Guide = {
   steps: [{ text: "" }],
 };
 
-export function TokenPlayground({ guideStep, setGuide }: LessonProps) {
+export function TokenPlayground({ guideStep, setGuide, setSentenceTokens }: LessonProps) {
   const [tokenizer, setTokenizer] = useState<Tiktoken | null>(null);
   const [failed, setFailed] = useState(false);
   const [draft, setDraft] = useState("");
   const [sentence, setSentence] = useState<string | null>(null);
+  const [original, setOriginal] = useState("");
+  const [reorder, setReorder] = useState(false);
+  // Reordering rewrites the sentence; keep the reader on the same walkthrough step when it does.
+  const keepStep = useRef(false);
   const [selected, setSelected] = useState<number | null>(null);
   const [embeddings, setEmbeddings] = useState<Embeddings | null>(null);
   const [embedFailed, setEmbedFailed] = useState(false);
@@ -154,13 +166,25 @@ export function TokenPlayground({ guideStep, setGuide }: LessonProps) {
   const step = steps?.[Math.min(guideStep, steps.length - 1)];
 
   useEffect(() => {
-    setGuide(steps ? { steps } : PROMPT);
-    return () => setGuide(null);
+    setGuide(steps ? { steps } : PROMPT, keepStep.current);
+    keepStep.current = false;
   }, [steps, setGuide]);
+
+  useEffect(() => () => setGuide(null), [setGuide]);
 
   useEffect(() => {
     if (step?.pick !== undefined) setSelected(step.pick);
   }, [step]);
+
+  // Share the sentence with later sections (attention works on its first few tokens).
+  useEffect(() => {
+    if (tokenizer && ids.length) setSentenceTokens(ids.map((id) => tokenizer.decode([id])));
+  }, [tokenizer, ids, setSentenceTokens]);
+
+  // Reordering can remove the selected token (e.g. " cat" becomes "cat"); follow the sentence instead.
+  useEffect(() => {
+    if (selected !== null && ids.length && !ids.includes(selected)) setSelected(ids[0]);
+  }, [ids, selected]);
 
   const neighbours = useMemo(
     () => (embeddings && selected !== null ? embeddings.nearest(embeddings.vector(selected), new Set([selected]), 5) : []),
@@ -187,6 +211,8 @@ export function TokenPlayground({ guideStep, setGuide }: LessonProps) {
     if (!tokenizer || !clean) return;
     setDraft(clean);
     setSentence(clean);
+    setOriginal(clean);
+    setReorder(false);
     setSelected(tokenizer.encode(clean, [], [])[0]);
     setTerms([]);
     setView("table");
@@ -268,10 +294,32 @@ export function TokenPlayground({ guideStep, setGuide }: LessonProps) {
             </button>
           ))}
         </div>
-        <button type="button" className="tp-edit" onClick={() => setSentence(null)}>
-          New sentence
-        </button>
+        <div className="tp-sentence-actions">
+          <button
+            type="button"
+            className="tp-edit tp-reorder-toggle"
+            aria-pressed={reorder}
+            onClick={() => setReorder(!reorder)}
+          >
+            {reorder ? "Done reordering" : "Reorder words"}
+          </button>
+          <button type="button" className="tp-edit" onClick={() => setSentence(null)}>
+            New sentence
+          </button>
+        </div>
       </div>
+
+      {reorder && (
+        <WordReorder
+          key={original}
+          tokenizer={tokenizer}
+          original={original}
+          onChange={(text) => {
+            keepStep.current = true;
+            setSentence(text);
+          }}
+        />
+      )}
 
       <div className="tp-tabs" role="tablist" aria-label="View">
         <button type="button" role="tab" aria-selected={view === "table"} onClick={() => setView("table")}>

@@ -4,12 +4,12 @@ import {
   UNEMBED,
   VOCAB,
   D_K,
-  SCALE,
   forward,
   fmt,
   fmtSmart,
 } from "./model";
 import type { Guide } from "./lessons";
+import { AttentionCalc } from "./AttentionCalc";
 import { NormSteps } from "./NormSteps";
 import { TokenPlayground } from "./TokenPlayground";
 
@@ -23,6 +23,9 @@ export type LessonProps = {
   guideStep: number;
   setGuide: (guide: Guide | null, keepStep?: boolean) => void;
   setGuideStep: (step: number) => void;
+  /** Tokens of the sentence typed in the Tokens section, if any. */
+  sentenceTokens: string[] | null;
+  setSentenceTokens: (tokens: string[] | null) => void;
 };
 
 const PEN = ["#e23b3b", "#2f6bff", "#1aa36a", "#7a3ff0"];
@@ -33,7 +36,7 @@ export const STAGES: Record<string, (props: LessonProps) => ReactElement> = {
   tokens: TokenPlayground,
   norm: NormSteps,
   qkv: Qkv,
-  scores: Scores,
+  scores: AttentionCalc,
   softmax: SoftmaxStage,
   mlp: Mlp,
   output: Output,
@@ -236,42 +239,6 @@ function Qkv({ token, setToken, pipe = "qkv" }: LessonProps) {
           V <Vec values={f.V[token]} tone="value" />
         </span>
       </div>
-    </Pipeline>
-  );
-}
-
-function Scores({ token, setToken, pipe = "attn" }: LessonProps) {
-  const f = useMemo(() => forward(token), [token]);
-  const query = f.Q[token];
-  return (
-    <Pipeline active={pipe} token={token}>
-      <WordPicker token={token} setToken={setToken} />
-      <p className="eq">
-        S = QKᵀ / √d_k &nbsp;·&nbsp; √d_k = √{D_K} ≈ {fmt(SCALE)} &nbsp;·&nbsp; mask j&gt;i
-      </p>
-      <p className="readout">
-        Query <Vec values={query} tone="query" />
-      </p>
-      <ul className="score-list">
-        {CONTEXT.map((word, index) => {
-          const hidden = index > token;
-          return (
-            <li key={word} className={hidden ? "dim" : ""}>
-              <b>{word}</b>
-              {hidden ? (
-                <span>masked (j &gt; i)</span>
-              ) : (
-                <span className="arith">
-                  ⟨Q,K⟩={fmtSmart(f.dots[token][index] ?? 0)}
-                  <span> / √d_k </span>
-                  <strong>{fmt(f.scores[token][index] ?? 0)}</strong>
-                  <span className="wtag"> A={fmt(f.weights[token][index] ?? 0, 3)}</span>
-                </span>
-              )}
-            </li>
-          );
-        })}
-      </ul>
     </Pipeline>
   );
 }

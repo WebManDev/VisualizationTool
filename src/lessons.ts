@@ -146,10 +146,10 @@ export const LESSONS: Lesson[] = [
     pipe: "attn",
     title: "Scaled dot-product attention",
     blurb:
-      "Score matrix S = QKᵀ / √d_k. Scale by √d_k so dots stay O(1) as d_k grows — otherwise softmax saturates. Causal mask sets S_{ij}=−∞ for j>i. Softmax over j yields A; output is A V. That is the entire attention op.",
+      "Attention scores how well a query word matches each earlier word: multiply Q by each K and add (a dot product), divide by √d to keep scores small, hide later words (the causal mask), then softmax the scores into weights that add up to 1. Work through it by hand with the built-in calculator.",
     concept: "Attention(Q,K,V) = softmax(QKᵀ/√d_k + mask) V",
     narration:
-      "For the selected query row, each visible key contributes a scaled dot product. Cat and sat score high for “on”, so their value vectors dominate the mix. The heatmap in the center is the causal A matrix — darker means more weight. Residual connection: we will add this mix back to X next.",
+      "Pick a query word, then compute its attention by hand: dot products, scale, e to the x, and normalise.",
     question: {
       prompt: "We divide QKᵀ by √d_k mainly to…",
       options: [

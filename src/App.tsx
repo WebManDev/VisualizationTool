@@ -28,6 +28,7 @@ export function App() {
   const [step, setStep] = useState(0);
   const [token, setToken] = useState(3);
   const [guess, setGuess] = useState("");
+  const [sentenceTokens, setSentenceTokens] = useState<string[] | null>(null);
   const [panel, setPanel] = useState<Panel>(null);
   const [popup, setPopup] = useState(false);
   const [picked, setPicked] = useState<string | null>(null);
@@ -135,6 +136,8 @@ export function App() {
             guideStep={guideStep}
             setGuide={showGuide}
             setGuideStep={setGuideStep}
+            sentenceTokens={sentenceTokens}
+            setSentenceTokens={setSentenceTokens}
           />
         </div>
       </section>
