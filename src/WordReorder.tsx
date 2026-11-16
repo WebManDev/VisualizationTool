@@ -37,7 +37,8 @@ export function WordReorder({
 }: {
   tokenizer: Tiktoken;
   original: string;
-  onChange: (sentence: string) => void;
+  /** `changed` lists words whose token IDs changed with this move. */
+  onChange: (sentence: string, changed: { word: string; from: number[]; to: number[] }[]) => void;
 }) {
   const [units, setUnits] = useState(() => split(original));
   const [changes, setChanges] = useState<Record<number, Change>>({});
@@ -71,7 +72,10 @@ export function WordReorder({
       timers.current.push(timer);
     }
     setUnits(next);
-    onChange(build(next));
+    onChange(
+      build(next),
+      next.filter((unit) => changed[unit.key]).map((unit) => ({ word: unit.text, ...changed[unit.key] })),
+    );
   }
 
   /** Move a word into another word's slot; punctuation never moves. */

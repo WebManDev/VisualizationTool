@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { Calculator } from "./Calculator";
 import type { Tiktoken } from "js-tiktoken/lite";
 import { VALUE_GRADIENT, VALUE_RANGE, valueStyle } from "./colors";
 import { loadEmbeddings, type Embeddings } from "./embeddings";
@@ -26,25 +27,44 @@ function showPiece(piece: string) {
   return piece.replaceAll(" ", "␣");
 }
 
+type Progress = {
+  reorderNote: string | null;
+  pickedNote: string | null;
+  mathsNote: string | null;
+  calcDone: boolean;
+};
+
 /** The walkthrough, written from the reader's own sentence. */
-function walkthrough(tokenizer: Tiktoken, ids: number[], rows: number[]): GuideStep[] {
+function walkthrough(tokenizer: Tiktoken, ids: number[], rows: number[], progress: Progress): GuideStep[] {
   const pieces = ids.map((id) => tokenizer.decode([id]));
   const show = (id: number) => `“${showPiece(tokenizer.decode([id]))}”`;
-  const steps: GuideStep[] = [
-    {
-      text: `Your sentence became ${ids.length} ${ids.length === 1 ? "token" : "tokens"}. A token is a chunk of text the model treats as one unit, and each coloured underline marks one.`,
-      focus: "sentence",
-    },
-  ];
-
   // A letters-only piece glued to the previous piece means one word was split.
   const split = pieces.findIndex((piece, i) => i > 0 && /^\p{L}+$/u.test(piece) && /\p{L}$/u.test(pieces[i - 1]));
+  let parts: string[] = [];
   if (split > 0) {
     let start = split - 1;
     while (start > 0 && !pieces[start].startsWith(" ") && /^\p{L}+$/u.test(pieces[start])) start -= 1;
     let end = split;
     while (end + 1 < pieces.length && /^\p{L}+$/u.test(pieces[end + 1])) end += 1;
-    const parts = pieces.slice(start, end + 1);
+    parts = pieces.slice(start, end + 1);
+  }
+  const splitWord = parts.join("").trim();
+
+  const steps: GuideStep[] = [
+    {
+      text: `Your sentence became ${ids.length} ${ids.length === 1 ? "token" : "tokens"}. A token is a chunk of text the model treats as one unit, and each coloured underline marks one.`,
+      focus: "sentence",
+      task: {
+        text: "Make a typo: press New sentence and misspell a word (try “teh” or “catz”). Watch how it gets cut up.",
+        done: split > 0,
+        feedback: split > 0
+          ? `“${splitWord}” became ${parts.map((part) => part.trim()).join(" + ")}. GPT-2 has no single token for it, so it builds the word from smaller pieces it does know.`
+          : undefined,
+      },
+    },
+  ];
+
+  if (split > 0) {
     steps.push({
       text: `“${parts.join("").trim()}” isn’t one entry in GPT-2’s vocabulary, so it was split into ${parts.length} pieces: ${parts.map((part) => part.trim()).join(" + ")}.`,
       focus: "sentence",
@@ -64,6 +84,11 @@ function walkthrough(tokenizer: Tiktoken, ids: number[], rows: number[]): GuideS
     steps.push({
       text: "Does a word’s position change its token? Press Reorder words and drag a word to the very front, then move the first word into the middle. Watch which IDs change, and which stay the same.",
       focus: "reorder",
+      task: {
+        text: "Drag a word to the very front of the sentence.",
+        done: progress.reorderNote !== null,
+        feedback: progress.reorderNote ?? undefined,
+      },
     });
   }
 
@@ -95,10 +120,31 @@ function walkthrough(tokenizer: Tiktoken, ids: number[], rows: number[]): GuideS
     {
       text: "So what does each number mean? Nothing you could name on its own: there is no “plural” number or “animal” number. Meaning is spread across all 768 and shows up in where the whole vector points. Tokens used in similar ways point in similar directions, so check “Closest in meaning” in the card.",
       focus: "detail",
+      task: {
+        text: "Click a different word in the table and compare its closest tokens.",
+        done: progress.pickedNote !== null,
+        feedback: progress.pickedNote ?? undefined,
+      },
     },
     {
       text: "Because meaning lives in directions, you can do maths with whole vectors. Open Vector maths and try king − man + woman: the result points closest to “queen”.",
       focus: "tabs",
+      task: {
+        text: "Open Vector maths and add or subtract at least two words (or click an example).",
+        done: progress.mathsNote !== null,
+        feedback: progress.mathsNote ?? undefined,
+      },
+    },
+    {
+      text: "The model doesn’t do anything clever here: it just adds and subtracts the numbers, one column at a time. Check it yourself.",
+      focus: "tabs",
+      task: {
+        text: "In Vector maths, press Let me calculate and work out the 4 result numbers with the calculator.",
+        done: progress.calcDone,
+        feedback: progress.calcDone
+          ? "All four right. GPT-2 does exactly this, just across 768 numbers instead of 4."
+          : undefined,
+      },
     },
     {
       text: "Click any token to see which tokens sit closest to it. One gap remains: the same word gets the same vector wherever it sits, so real models also add a position vector to tell word order apart.",
@@ -113,15 +159,13 @@ const PROMPT: Guide = {
   steps: [{ text: "" }],
 };
 
-export function TokenPlayground({ guideStep, setGuide, setSentenceTokens }: LessonProps) {
+export function TokenPlayground({ guideStep, setGuide, setGuideStep, setSentenceTokens }: LessonProps) {
   const [tokenizer, setTokenizer] = useState<Tiktoken | null>(null);
   const [failed, setFailed] = useState(false);
   const [draft, setDraft] = useState("");
   const [sentence, setSentence] = useState<string | null>(null);
   const [original, setOriginal] = useState("");
   const [reorder, setReorder] = useState(false);
-  // Reordering rewrites the sentence; keep the reader on the same walkthrough step when it does.
-  const keepStep = useRef(false);
   const [selected, setSelected] = useState<number | null>(null);
   const [embeddings, setEmbeddings] = useState<Embeddings | null>(null);
   const [embedFailed, setEmbedFailed] = useState(false);
@@ -129,6 +173,14 @@ export function TokenPlayground({ guideStep, setGuide, setSentenceTokens }: Less
   const [terms, setTerms] = useState<Term[]>([]);
   const [extra, setExtra] = useState("");
   const [extraError, setExtraError] = useState<string | null>(null);
+  const [reorderNote, setReorderNote] = useState<string | null>(null);
+  const [pickedNote, setPickedNote] = useState<string | null>(null);
+  const [calcMode, setCalcMode] = useState(false);
+  const [calcAnswers, setCalcAnswers] = useState<string[]>(["", "", "", ""]);
+  const [calcFocus, setCalcFocus] = useState<number | null>(null);
+  // "New sentence" from a task step returns to that step once the new sentence is in.
+  const resumeStep = useRef<number | null>(null);
+  const lastOriginal = useRef("");
 
   // The vocabulary is about 500 KB, so it only downloads when this section opens.
   useEffect(() => {
@@ -160,16 +212,57 @@ export function TokenPlayground({ guideStep, setGuide, setSentenceTokens }: Less
   );
   const rows = useMemo(() => [...new Set(ids)], [ids]);
 
+  const result = useMemo(() => {
+    if (!embeddings || terms.length === 0) return null;
+    const total = new Float32Array(embeddings.vector(terms[0].id).length);
+    const shown = [0, 0, 0, 0];
+    for (const term of terms) {
+      embeddings.vector(term.id).forEach((value, d) => (total[d] += term.sign * value));
+      embeddings.first4(term.id).forEach((value, d) => (shown[d] += term.sign * value));
+    }
+    // Leaving out the inputs is the usual rule; otherwise "king" is often closest to king − man + woman.
+    const closest = embeddings.nearest(total, new Set(terms.map((term) => term.id)), 5);
+    return { shown, closest };
+  }, [embeddings, terms]);
+
+  const calcChecks = useMemo(
+    () => (result ? result.shown.map((truth, d) => checkSum(calcAnswers[d], truth, terms, embeddings, d)) : []),
+    [result, calcAnswers, terms, embeddings],
+  );
+  const calcDone = calcChecks.length === 4 && calcChecks.every((check) => check.ok === true);
+  const [calcDoneOnce, setCalcDoneOnce] = useState(false);
+  useEffect(() => {
+    if (calcDone) setCalcDoneOnce(true);
+  }, [calcDone]);
+
+  const mathsNote =
+    tokenizer && result && terms.length >= 2
+      ? `${terms.map((t, i) => `${i === 0 ? (t.sign < 0 ? "−" : "") : t.sign < 0 ? " − " : " + "}${tokenizer.decode([t.id]).trim()}`).join("")} lands closest to “${tokenizer.decode([result.closest[0]]).trim()}”. The answer comes purely from adding and subtracting numbers.`
+      : null;
+
   const steps = useMemo(
-    () => (tokenizer && ids.length ? walkthrough(tokenizer, ids, rows) : null),
-    [tokenizer, ids, rows],
+    () =>
+      tokenizer && ids.length
+        ? walkthrough(tokenizer, ids, rows, { reorderNote, pickedNote, mathsNote, calcDone: calcDoneOnce })
+        : null,
+    [tokenizer, ids, rows, reorderNote, pickedNote, mathsNote, calcDoneOnce],
   );
   const step = steps?.[Math.min(guideStep, steps.length - 1)];
 
   useEffect(() => {
-    setGuide(steps ? { steps } : PROMPT, keepStep.current);
-    keepStep.current = false;
-  }, [steps, setGuide]);
+    if (!steps) {
+      setGuide(PROMPT);
+      return;
+    }
+    // Same sentence (reordered, or a task ticked): stay put. A new sentence starts over, unless resuming.
+    const fresh = original !== lastOriginal.current;
+    lastOriginal.current = original;
+    setGuide({ steps }, !fresh);
+    if (fresh && resumeStep.current !== null) {
+      setGuideStep(resumeStep.current);
+      resumeStep.current = null;
+    }
+  }, [steps, setGuide, original, setGuideStep]);
 
   useEffect(() => () => setGuide(null), [setGuide]);
 
@@ -192,19 +285,6 @@ export function TokenPlayground({ guideStep, setGuide, setSentenceTokens }: Less
     [embeddings, selected],
   );
 
-  const result = useMemo(() => {
-    if (!embeddings || terms.length === 0) return null;
-    const total = new Float32Array(embeddings.vector(terms[0].id).length);
-    const shown = [0, 0, 0, 0];
-    for (const term of terms) {
-      embeddings.vector(term.id).forEach((value, d) => (total[d] += term.sign * value));
-      embeddings.first4(term.id).forEach((value, d) => (shown[d] += term.sign * value));
-    }
-    // Leaving out the inputs is the usual rule; otherwise "king" is often closest to king − man + woman.
-    const closest = embeddings.nearest(total, new Set(terms.map((term) => term.id)), 5);
-    return { shown, closest };
-  }, [embeddings, terms]);
-
   if (failed) return <p className="tp-status">The tokenizer didn’t load. Refresh the page to try again.</p>;
 
   function start(text: string) {
@@ -217,6 +297,14 @@ export function TokenPlayground({ guideStep, setGuide, setSentenceTokens }: Less
     setSelected(tokenizer.encode(clean, [], [])[0]);
     setTerms([]);
     setView("table");
+    setCalcAnswers(["", "", "", ""]);
+  }
+
+  function pickByHand(id: number) {
+    setSelected(id);
+    if (!tokenizer || !embeddings || id === ids[0]) return;
+    const near = embeddings.nearest(embeddings.vector(id), new Set([id]), 3).map((n) => `“${tokenizer.decode([n]).trim()}”`);
+    setPickedNote(`Closest to “${tokenizer.decode([id]).trim()}”: ${near.join(", ")}. Tokens used in similar ways end up with similar vectors.`);
   }
 
   function addTerm(id: number, sign: 1 | -1 = 1) {
@@ -289,7 +377,7 @@ export function TokenPlayground({ guideStep, setGuide, setSentenceTokens }: Less
               className={id === selected ? "on" : ""}
               style={{ borderBottomColor: pen(id) }}
               aria-pressed={id === selected}
-              onClick={() => (view === "maths" ? addTerm(id) : setSelected(id))}
+              onClick={() => (view === "maths" ? addTerm(id) : pickByHand(id))}
             >
               {label(id)}
             </button>
@@ -304,7 +392,14 @@ export function TokenPlayground({ guideStep, setGuide, setSentenceTokens }: Less
           >
             {reorder ? "Done reordering" : "Reorder words"}
           </button>
-          <button type="button" className="tp-edit" onClick={() => setSentence(null)}>
+          <button
+            type="button"
+            className="tp-edit"
+            onClick={() => {
+              resumeStep.current = guideStep;
+              setSentence(null);
+            }}
+          >
             New sentence
           </button>
         </div>
@@ -315,9 +410,14 @@ export function TokenPlayground({ guideStep, setGuide, setSentenceTokens }: Less
           key={original}
           tokenizer={tokenizer}
           original={original}
-          onChange={(text) => {
-            keepStep.current = true;
+          onChange={(text, changed) => {
             setSentence(text);
+            if (changed.length) {
+              const c = changed[0];
+              setReorderNote(
+                `“${c.word}” went from ${c.from.join("·")} to ${c.to.join("·")}${changed.length > 1 ? `, and “${changed[1].word}” changed too` : ""}. Only the space in front of a word changed, not its meaning, but that’s enough for a new token.`,
+              );
+            }
           }}
         />
       )}
@@ -347,7 +447,7 @@ export function TokenPlayground({ guideStep, setGuide, setSentenceTokens }: Less
                   type="button"
                   className={id === selected ? "tp-row on" : "tp-row"}
                   aria-pressed={id === selected}
-                  onClick={() => setSelected(id)}
+                  onClick={() => pickByHand(id)}
                 >
                   <span className="tp-word" title={showPiece(label(id))}>
                     {showPiece(label(id))}
@@ -385,7 +485,8 @@ export function TokenPlayground({ guideStep, setGuide, setSentenceTokens }: Less
           )}
         </div>
       ) : (
-        <div className="tp-maths">
+        <div className={calcMode && result ? "tp-maths with-calc" : "tp-maths"}>
+          <div className="tp-maths-main">
           <p className="tp-hint-line">
             Click tokens in your sentence to add them, then click a sign to flip it between + and −.
           </p>
@@ -449,12 +550,47 @@ export function TokenPlayground({ guideStep, setGuide, setSentenceTokens }: Less
                 <div className="tp-sum-row total" role="row">
                   <span className="tp-sign">=</span>
                   <span className="tp-word">result</span>
-                  {result.shown.map((value, d) => (
-                    <span key={d} className="tp-cell" style={valueStyle(value)}>
-                      {fmt(value)}
-                    </span>
-                  ))}
+                  {result.shown.map((value, d) =>
+                    calcMode && calcChecks[d]?.ok !== true ? (
+                      <input
+                        key={d}
+                        className={calcChecks[d]?.ok === false ? "tp-calc-in wrong" : "tp-calc-in"}
+                        inputMode="decimal"
+                        aria-label={`Result number ${d + 1}`}
+                        value={calcAnswers[d]}
+                        onFocus={() => setCalcFocus(d)}
+                        onChange={(event) => setCalcAnswers(calcAnswers.map((a, i) => (i === d ? event.target.value : a)))}
+                      />
+                    ) : (
+                      <span key={d} className={calcMode ? "tp-cell solved" : "tp-cell"} style={valueStyle(value)}>
+                        {fmt(value)}
+                      </span>
+                    ),
+                  )}
                   <span />
+                </div>
+              )}
+              {result && (
+                <div className="tp-calc-bar">
+                  <button
+                    type="button"
+                    aria-pressed={calcMode}
+                    onClick={() => {
+                      setCalcMode(!calcMode);
+                      setCalcAnswers(["", "", "", ""]);
+                    }}
+                  >
+                    {calcMode ? "Hide my calculation" : "Let me calculate"}
+                  </button>
+                  {calcMode && (
+                    <span className="tp-calc-feedback" aria-live="polite">
+                      {calcDone
+                        ? "✓ All four right. That’s the whole trick: add or subtract each column."
+                        : calcFocus !== null && calcChecks[calcFocus]?.hint
+                          ? calcChecks[calcFocus].hint
+                          : "Work down each column: add the + rows and subtract the − rows. Round to 3 decimal places."}
+                    </span>
+                  )}
                 </div>
               )}
               <p className="tp-closest">
@@ -468,6 +604,15 @@ export function TokenPlayground({ guideStep, setGuide, setSentenceTokens }: Less
                   : "loading…"}
               </p>
             </div>
+          )}
+          </div>
+          {calcMode && result && (
+            <Calculator
+              target={calcFocus !== null ? String(calcFocus) : null}
+              onInsert={(value) =>
+                calcFocus !== null && setCalcAnswers(calcAnswers.map((a, i) => (i === calcFocus ? value : a)))
+              }
+            />
           )}
         </div>
       )}
@@ -489,4 +634,20 @@ function ValueLegend() {
       <small>deeper colour = bigger number (full at ±{VALUE_RANGE})</small>
     </p>
   );
+}
+
+/** Checks one result number and, when it's wrong, guesses the likely slip. */
+function checkSum(answer: string, truth: number, terms: Term[], embeddings: Embeddings | null, d: number) {
+  const value = Number(answer.replace("−", "-"));
+  if (answer.trim() === "" || !Number.isFinite(value)) return { ok: null as boolean | null, hint: "" };
+  const tolerance = 0.0015;
+  if (Math.abs(value - truth) <= tolerance) return { ok: true, hint: "" };
+  const parts = embeddings ? terms.map((t) => embeddings.first4(t.id)[d]) : [];
+  const allAdded = parts.reduce((a, b) => a + b, 0);
+  let hint = "Not quite. Add the numbers in the + rows and subtract the numbers in the − rows, in this column only.";
+  if (Math.abs(value + truth) <= tolerance) hint = "Right size, wrong sign. Check the minus signs.";
+  else if (terms.some((t) => t.sign < 0) && Math.abs(value - allAdded) <= tolerance)
+    hint = "Looks like you added every row. The rows marked − need to be subtracted.";
+  else if (Math.abs(value - truth) <= 0.01) hint = "Very close: round to 3 decimal places.";
+  return { ok: false, hint };
 }

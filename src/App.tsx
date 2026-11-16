@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { LESSONS, type Guide } from "./lessons";
+import { LESSONS, type Guide, type Task } from "./lessons";
 import { VOCAB, predict } from "./model";
 import { STAGES } from "./Stages";
 
@@ -35,6 +35,9 @@ export function App() {
   const [guide, setGuide] = useState<Guide | null>(null);
   const [guideStep, setGuideStep] = useState(0);
   const [cover, setCover] = useState(true);
+  // Which simple "Try it" tasks (for sections without their own walkthrough) are done.
+  const [tried, setTried] = useState<Set<string>>(new Set());
+  const tokenAtEntry = useRef(token);
 
   const lesson = LESSONS[step];
   const View = STAGES[lesson.id];
@@ -80,6 +83,7 @@ export function App() {
     setPicked(null);
     setGuideStep(0);
     setStep(index);
+    tokenAtEntry.current = token;
   }
 
   function goId(id: string) {
@@ -96,7 +100,21 @@ export function App() {
     };
   }, []);
 
-  const steps = guide?.steps ?? sentences(lesson.narration).map((text) => ({ text }));
+  const tryIt = lesson.tryIt;
+  useEffect(() => {
+    if (!tryIt || tried.has(lesson.id)) return;
+    const done =
+      (tryIt.check === "guess" && guess.trim() !== "") ||
+      (tryIt.check === "token" && token !== tokenAtEntry.current) ||
+      (tryIt.check === "toc" && panel === "toc") ||
+      (tryIt.check === "quiz" && panel === "quiz");
+    if (done) setTried(new Set([...tried, lesson.id]));
+  }, [tryIt, tried, lesson.id, guess, token, panel]);
+
+  const simpleTask: Task | undefined = tryIt
+    ? { text: tryIt.text, done: tried.has(lesson.id), feedback: tryIt.feedback }
+    : undefined;
+  const steps = guide?.steps ?? sentences(lesson.narration).map((text) => ({ text, task: simpleTask }));
 
   return (
     <main className={cover ? "frame on-cover" : "frame"}>
@@ -387,6 +405,7 @@ function Explainer({
           <p className="explainer-text" aria-live="polite">
             {steps[current].text}
           </p>
+          {steps[current].task && <TryIt task={steps[current].task!} />}
           <div className="explainer-nav">
             <button type="button" disabled={current === 0} onClick={() => setStep(current - 1)}>
               Back
@@ -401,6 +420,16 @@ function Explainer({
         </div>
       </div>
     </section>
+  );
+}
+
+function TryIt({ task }: { task: Task }) {
+  return (
+    <div className={task.done ? "try done" : "try"} aria-live="polite">
+      <p className="try-label">{task.done ? "✓ Done" : "Try it"}</p>
+      <p>{task.text}</p>
+      {task.done && task.feedback && <p className="try-feedback">{task.feedback}</p>}
+    </div>
   );
 }
 

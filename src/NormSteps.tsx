@@ -17,11 +17,18 @@ function sigma(value: number) {
 }
 
 /** Short explainer text per chunk, using the student's own numbers. */
-function texts(x: number[], ln: ReturnType<typeof layerNorm>): GuideStep[] {
+type Tried = { changed: boolean; scaled: boolean; dials: boolean };
+
+function texts(x: number[], ln: ReturnType<typeof layerNorm>, tried: Tried, gamma: number, beta: number): GuideStep[] {
   const flat = ln.variance < 1e-9;
   return [
     {
       text: "These are one token’s numbers. Change any of them in the boxes above: layer norm will tidy them up one small step at a time.",
+      task: {
+        text: "Change one of the four numbers, or make one much bigger than the rest.",
+        done: tried.changed,
+        feedback: `The bars now show ${x.map(num).join(", ")}. Every later step uses your numbers.`,
+      },
     },
     {
       text: `Step 1: find the average of the numbers. Yours average to ${num(ln.mean)}, shown as the dashed line.`,
@@ -38,9 +45,24 @@ function texts(x: number[], ln: ReturnType<typeof layerNorm>): GuideStep[] {
       text: flat
         ? `Step 4: divide by σ. Dividing by 0 is impossible, so layer norm adds a tiny ε first and divides by ${sigma(ln.std)} instead. Everything stays 0. Change one number to see the usual case.`
         : "Step 4: divide every number by σ. Now the spread is exactly 1, however big or small your numbers were. Try the ×10 button to check.",
+      task: {
+        text: "Press “×10 my numbers” and watch the bars.",
+        done: tried.scaled,
+        feedback: "The bars didn’t move. Making every number 10 times bigger also makes σ 10 times bigger, so dividing cancels it out.",
+      },
     },
     {
       text: "Step 5: the model then stretches the result with γ and shifts it with β. It learns these two dials in training. Drag them to see what they do.",
+      task: {
+        text: "Drag the γ and β sliders.",
+        done: tried.dials,
+        feedback:
+          `With γ = ${num(gamma)}, every bar is multiplied by ${num(gamma)}` +
+          (beta === 0
+            ? ". β is still 0, so nothing moves up or down yet."
+            : `, then moved ${beta > 0 ? "up" : "down"} by ${num(Math.abs(beta))}.`) +
+          " The outlines show where they were.",
+      },
     },
     {
       text: `That’s all of layer norm, and every token gets it separately. GPT-2 does the same with 768 numbers per token instead of ${x.length}.`,
@@ -115,10 +137,12 @@ export function NormSteps({ guideStep, setGuide, setGuideStep }: LessonProps) {
   const [beta, setBeta] = useState(0);
   const ln = useMemo(() => layerNorm(x, gamma, beta), [x, gamma, beta]);
   const step = Math.min(guideStep, CHUNKS.length - 1);
+  const [scaled, setScaled] = useState(false);
+  const tried = { changed: x.join() !== START.join(), scaled, dials: gamma !== 1 || beta !== 0 };
 
   useEffect(() => {
-    setGuide({ steps: texts(x, ln) }, true);
-  }, [x, ln, setGuide]);
+    setGuide({ steps: texts(x, ln, tried, gamma, beta) }, true);
+  }, [x, ln, tried.changed, tried.scaled, tried.dials, gamma, beta, setGuide]);
 
   useEffect(() => () => setGuide(null), [setGuide]);
 
@@ -214,7 +238,13 @@ export function NormSteps({ guideStep, setGuide, setGuideStep }: LessonProps) {
               ))}
             </p>
             <div className="ln-try">
-              <button type="button" onClick={() => replace(x.map((value) => value * 10))}>
+              <button
+                type="button"
+                onClick={() => {
+                  replace(x.map((value) => value * 10));
+                  setScaled(true);
+                }}
+              >
                 ×10 my numbers
               </button>
               <button type="button" onClick={() => replace(x.map((value) => value / 10))}>

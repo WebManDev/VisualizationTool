@@ -7,7 +7,9 @@ export type Question = {
 };
 
 /** What the explainer box shows; `focus` and `pick` tie a step to the visual. */
-export type GuideStep = { text: string; focus?: string; pick?: number };
+/** A "Try it" task inside a walkthrough step. `feedback` explains what the student just saw once it's done. */
+export type Task = { text: string; done: boolean; feedback?: string };
+export type GuideStep = { text: string; focus?: string; pick?: number; task?: Task };
 export type Guide = { prompt?: string; steps: GuideStep[] };
 
 export type Lesson = {
@@ -21,6 +23,8 @@ export type Lesson = {
   concept: string;
   narration: string;
   question: Question;
+  /** A hands-on task for sections without their own walkthrough; App checks it. */
+  tryIt?: { text: string; check: "guess" | "token" | "toc" | "quiz"; feedback: string };
 };
 
 export const LESSONS: Lesson[] = [
@@ -35,6 +39,11 @@ export const LESSONS: Lesson[] = [
     concept: "p(next | context) via a stack of residual blocks — not a hand-written grammar.",
     narration:
       "Assume you know layers, activations, and training by gradient descent. The new question is how to encode a variable-length sequence so each position can depend on earlier ones. Autoregressive LMs answer that by predicting one next token at a time. Type a guess for “the cat sat on ____”; we will compare it to the model’s softmax at the end.",
+    tryIt: {
+      text: "Type your guess for the next word in the empty box. We’ll check it against the model at the end.",
+      check: "guess",
+      feedback: "Saved. Keep it in mind: the last section shows the model’s own guess.",
+    },
     question: {
       prompt: "An autoregressive LM’s training target is…",
       options: [
@@ -58,6 +67,11 @@ export const LESSONS: Lesson[] = [
     concept: "Attention mixes across positions; the MLP mixes across channels at one position.",
     narration:
       "Read the center strip left to right. Tokens become vectors. LayerNorm stabilizes them. Self-attention builds Q, K, V and a causal attention matrix, then mixes Values. A residual adds the pre-attention representation back. The MLP is a position-wise feed-forward net with another residual. Finally the last position’s vector is dotted with the vocabulary and softmaxed. Click a stage on the left map to zoom that column.",
+    tryIt: {
+      text: "Open the ≡ tab on the left and click any stage in the map to jump to it.",
+      check: "toc",
+      feedback: "That map is your shortcut: every stage links to its section.",
+    },
     question: {
       prompt: "In a residual decoder block, attention’s job is primarily…",
       options: [
@@ -127,6 +141,11 @@ export const LESSONS: Lesson[] = [
     concept: "Q,K ∈ ℝ^{T×d_k}, V ∈ ℝ^{T×d_v} — same X, different projections.",
     narration:
       "Select a token. Its Q, K, and V appear under the left-to-right strip. In Transformer Explainer you would see twelve heads; the algebra per head is identical to this one. Causal masking will zero out future keys in the next step so position t cannot attend to t+1…T.",
+    tryIt: {
+      text: "Click a different word. Watch its Q, K and V change.",
+      check: "token",
+      feedback: "Every word gets its own Q, K and V, all made from the same vector by three different weight matrices.",
+    },
     question: {
       prompt: "Q, K, and V are…",
       options: [
@@ -173,6 +192,11 @@ export const LESSONS: Lesson[] = [
     concept: "A_{i:} = softmax(S_{i:}) · then attn_out_i = Σⱼ A_{ij} Vⱼ",
     narration:
       "Watch the last row of A. Softmax concentrates mass on cat and sat. The mixed value is the weighted sum of V rows. Bump the cat score with the slider to steal mass — same operator as the final vocab softmax, different axis.",
+    tryIt: {
+      text: "Click a different word to see how its attention weights spread across the earlier words.",
+      check: "token",
+      feedback: "Each row of weights adds up to 1, whichever word is asking.",
+    },
     question: {
       prompt: "Attention weights A_{i:} always…",
       options: [
@@ -196,6 +220,11 @@ export const LESSONS: Lesson[] = [
     concept: "x + MLP(LN(x)) — expand d → d_ff → d, then residual add.",
     narration:
       "The strip shows residual₁ = X + AttnOut, then a ReLU expansion, then residual₂. In GPT-2, d_ff is usually 4×d_model. Here the MLP is a tiny affine-ReLU so you can see channels light up without a wall of weights. No other token’s vector enters this stage.",
+    tryIt: {
+      text: "Click a different word and watch which channels light up.",
+      check: "token",
+      feedback: "The MLP works on one word at a time, so changing the word changes the whole column.",
+    },
     question: {
       prompt: "The MLP in a transformer block…",
       options: [
@@ -219,6 +248,11 @@ export const LESSONS: Lesson[] = [
     concept: "logits = U h_T ;   p = softmax(logits)",
     narration:
       "The final vector for “on” is scored against every vocab row. Mat aligns with the direction the block carved out, so it wins. Compare your opening guess. Real models stack dozens of identical blocks before this unembed — algebra per block matches what you just walked.",
+    tryIt: {
+      text: "Open the Q tab and test yourself on where these probabilities come from.",
+      check: "quiz",
+      feedback: "The scores are the final vector compared with every word in the vocabulary, then softmaxed.",
+    },
     question: {
       prompt: "Vocabulary probabilities come from…",
       options: [
