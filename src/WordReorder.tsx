@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import type { Tiktoken } from "js-tiktoken/lite";
+import { ID_GRADIENT, idStyle } from "./colors";
 
 type Unit = { key: number; text: string; word: boolean };
 type Change = { from: number[]; to: number[] };
@@ -144,7 +145,13 @@ export function WordReorder({
             >
               <span className="wr-word">{unit.text}</span>
               <small aria-live="polite">
-                {change ? `${change.from.join("·")} → ${change.to.join("·")}` : tokens[unit.key].join("·")}
+                {change ? (
+                  <>
+                    <Ids ids={change.from} /> → <Ids ids={change.to} />
+                  </>
+                ) : (
+                  <Ids ids={tokens[unit.key]} />
+                )}
               </small>
             </button>
           );
@@ -160,8 +167,27 @@ export function WordReorder({
         >
           Reset order
         </button>
-        <span>Numbers under each word are its token IDs. A flash means moving it changed its token.</span>
+        <span className="wr-key">
+          Token IDs:
+          <em style={idStyle(40)}>low</em>
+          <i style={{ background: ID_GRADIENT }} aria-hidden />
+          <em style={idStyle(40000)}>high</em>
+        </span>
+        <span>A red flash means moving the word changed its token.</span>
       </div>
     </div>
+  );
+}
+
+/** Token IDs as small chips, coloured light (low ID) to dark (high ID). */
+function Ids({ ids }: { ids: number[] }) {
+  return (
+    <>
+      {ids.map((id, i) => (
+        <b key={i} className="wr-id" style={idStyle(id)}>
+          {id}
+        </b>
+      ))}
+    </>
   );
 }

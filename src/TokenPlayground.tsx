@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import type { Tiktoken } from "js-tiktoken/lite";
+import { VALUE_GRADIENT, VALUE_RANGE, valueStyle } from "./colors";
 import { loadEmbeddings, type Embeddings } from "./embeddings";
 import type { Guide, GuideStep } from "./lessons";
 import type { LessonProps } from "./Stages";
@@ -88,7 +89,7 @@ function walkthrough(tokenizer: Tiktoken, ids: number[], rows: number[]): GuideS
 
   steps.push(
     {
-      text: "The green numbers are the start of that token’s vector, also called its embedding. These are GPT-2’s real numbers: each token has 768, and the table shows the first 4. This vector, not the word or the ID, is what goes into the network.",
+      text: "The coloured numbers are the start of that token’s vector, also called its embedding: blue is positive, red is negative, and deeper colour means a bigger number. These are GPT-2’s real numbers: each token has 768, and the table shows the first 4. This vector, not the word or the ID, is what goes into the network.",
       focus: "cells",
     },
     {
@@ -338,6 +339,7 @@ export function TokenPlayground({ guideStep, setGuide, setSentenceTokens }: Less
             <p className="tp-title">
               {rows.length} {rows.length === 1 ? "row" : "rows"} · first 4 of 768 numbers per token
             </p>
+            <ValueLegend />
             <div className="tp-rows">
               {rows.map((id) => (
                 <button
@@ -352,7 +354,12 @@ export function TokenPlayground({ guideStep, setGuide, setSentenceTokens }: Less
                   </span>
                   <span className="tp-id">{id}</span>
                   {(embeddings ? embeddings.first4(id) : [null, null, null, null]).map((value, index) => (
-                    <span key={index} className="tp-cell">
+                    <span
+                      key={index}
+                      className="tp-cell"
+                      style={value === null ? undefined : valueStyle(value)}
+                      title={value === null ? undefined : `${fmt(value)}: ${value >= 0 ? "positive" : "negative"}`}
+                    >
                       {value === null ? "…" : fmt(value)}
                     </span>
                   ))}
@@ -424,7 +431,7 @@ export function TokenPlayground({ guideStep, setGuide, setSentenceTokens }: Less
                   </button>
                   <span className="tp-word">{showPiece(label(term.id))}</span>
                   {(embeddings ? embeddings.first4(term.id) : [null, null, null, null]).map((value, d) => (
-                    <span key={d} className="tp-cell">
+                    <span key={d} className="tp-cell" style={value === null ? undefined : valueStyle(value)}>
                       {value === null ? "…" : fmt(value)}
                     </span>
                   ))}
@@ -443,7 +450,7 @@ export function TokenPlayground({ guideStep, setGuide, setSentenceTokens }: Less
                   <span className="tp-sign">=</span>
                   <span className="tp-word">result</span>
                   {result.shown.map((value, d) => (
-                    <span key={d} className="tp-cell">
+                    <span key={d} className="tp-cell" style={valueStyle(value)}>
                       {fmt(value)}
                     </span>
                   ))}
@@ -470,5 +477,16 @@ export function TokenPlayground({ guideStep, setGuide, setSentenceTokens }: Less
         vector points. “Closest” and the maths use a compressed copy of each vector (128 of 768 numbers’ worth).
       </p>
     </div>
+  );
+}
+
+function ValueLegend() {
+  return (
+    <p className="tp-legend" aria-label={`Colour key: red is negative, grey is near zero, blue is positive; full colour at ±${VALUE_RANGE}`}>
+      <span>negative</span>
+      <i style={{ background: VALUE_GRADIENT }} aria-hidden />
+      <span>positive</span>
+      <small>deeper colour = bigger number (full at ±{VALUE_RANGE})</small>
+    </p>
   );
 }
