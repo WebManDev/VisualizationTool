@@ -34,6 +34,7 @@ export function App() {
   const [picked, setPicked] = useState<string | null>(null);
   const [guide, setGuide] = useState<Guide | null>(null);
   const [guideStep, setGuideStep] = useState(0);
+  const [cover, setCover] = useState(true);
 
   const lesson = LESSONS[step];
   const View = STAGES[lesson.id];
@@ -64,7 +65,7 @@ export function App() {
     observer.observe(box);
     observer.observe(content);
     return () => observer.disconnect();
-  }, [step]);
+  }, [step, cover]);
 
   // keepStep: the stage only updated its text (e.g. new numbers), so stay on the same step.
   const showGuide = useCallback((next: Guide | null, keepStep = false) => {
@@ -73,7 +74,9 @@ export function App() {
   }, []);
 
   function goTo(index: number) {
-    if (index < 0 || index >= LESSONS.length || index === step) return;
+    if (index < 0 || index >= LESSONS.length) return;
+    setCover(false);
+    if (index === step) return;
     setPicked(null);
     setGuideStep(0);
     setStep(index);
@@ -93,8 +96,12 @@ export function App() {
     };
   }, []);
 
+  const steps = guide?.steps ?? sentences(lesson.narration).map((text) => ({ text }));
+
   return (
-    <main className="frame">
+    <main className={cover ? "frame on-cover" : "frame"}>
+      <Progress step={step} part={cover ? 0 : (Math.min(guideStep, steps.length - 1) + 1) / steps.length} cover={cover} />
+
       <button
         type="button"
         className="tab tab-left"
@@ -114,7 +121,7 @@ export function App() {
         className="tab tab-right"
         aria-label="Open question"
         aria-expanded={panel === "quiz"}
-        hidden={panel !== null}
+        hidden={panel !== null || cover}
         onClick={() => setPanel("quiz")}
       >
         <svg viewBox="0 0 80 78" aria-hidden>
@@ -123,7 +130,9 @@ export function App() {
         </svg>
       </button>
 
-      <section ref={visual} className="visual" aria-label={lesson.title}>
+      {cover && <Cover onStart={() => setCover(false)} />}
+
+      <section ref={visual} className="visual" aria-label={lesson.title} hidden={cover}>
         <div ref={fit}>
           <View
             key={lesson.id}
@@ -142,34 +151,37 @@ export function App() {
         </div>
       </section>
 
-      <Explainer
-        prompt={guide?.prompt}
-        steps={guide?.steps ?? sentences(lesson.narration).map((text) => ({ text }))}
-        step={guideStep}
-        setStep={setGuideStep}
-      />
+      {!cover && (
+        <Explainer
+          kicker={`${lesson.group} · ${lesson.label}`}
+          prompt={guide?.prompt}
+          steps={steps}
+          step={guideStep}
+          setStep={setGuideStep}
+        />
+      )}
 
       <button
         type="button"
         className="arrow arrow-back"
-        aria-label="Previous section"
-        disabled={step === 0}
-        onClick={() => goTo(step - 1)}
+        aria-label={step === 0 ? "Back to the cover" : "Previous section"}
+        disabled={cover}
+        onClick={() => (step === 0 ? setCover(true) : goTo(step - 1))}
       >
-        <svg viewBox="0 0 32 48" aria-hidden>
-          <path d="M12 1 L1 34 L30 45 L17 1" />
+        <svg viewBox="0 0 24 24" aria-hidden>
+          <path d="M14.5 5.5 L8 12 L14.5 18.5" />
         </svg>
       </button>
 
       <button
         type="button"
         className="arrow arrow-forward"
-        aria-label="Next section"
-        disabled={step === LESSONS.length - 1}
-        onClick={() => goTo(step + 1)}
+        aria-label={cover ? "Start" : "Next section"}
+        disabled={!cover && step === LESSONS.length - 1}
+        onClick={() => (cover ? setCover(false) : goTo(step + 1))}
       >
-        <svg viewBox="0 0 32 42" aria-hidden>
-          <path d="M3 1 C2 13 2 26 1 40 M3 4 L30 18 L2 33" />
+        <svg viewBox="0 0 24 24" aria-hidden>
+          <path d="M9.5 5.5 L16 12 L9.5 18.5" />
         </svg>
       </button>
 
@@ -276,12 +288,86 @@ export function App() {
   );
 }
 
+const GROUPS = [...new Set(LESSONS.map((item) => item.group))];
+const COVER_WORDS = ["The", "cat", "sat", "on", "the"];
+const COVER_GUESS = "mat";
+
+/** Thin chapter bar across the top: one segment per group, filled as you go. */
+function Progress({ step, part, cover }: { step: number; part: number; cover: boolean }) {
+  const done = cover ? 0 : step + part;
+  return (
+    <div
+      className="progress"
+      role="progressbar"
+      aria-label="Lecture progress"
+      aria-valuemin={0}
+      aria-valuemax={LESSONS.length}
+      aria-valuenow={Math.round(done * 10) / 10}
+    >
+      {GROUPS.map((group) => {
+        const first = LESSONS.findIndex((item) => item.group === group);
+        const count = LESSONS.filter((item) => item.group === group).length;
+        const fill = Math.max(0, Math.min(1, (done - first) / count));
+        return (
+          <span key={group} style={{ flexGrow: count }} title={group}>
+            <i style={{ width: `${fill * 100}%` }} />
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
+/** Title screen: the sentence builds word by word, then the model "types" its guess. */
+function Cover({ onStart }: { onStart: () => void }) {
+  const total = COVER_WORDS.length + COVER_GUESS.length;
+  const still = typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+  const [shown, setShown] = useState(still ? total : 0);
+
+  useEffect(() => {
+    if (still) return;
+    const timer = window.setInterval(() => setShown((n) => (n >= total + 6 ? 0 : n + 1)), 380);
+    return () => window.clearInterval(timer);
+  }, [still, total]);
+
+  const words = Math.min(shown, COVER_WORDS.length);
+  const typed = COVER_GUESS.slice(0, Math.max(0, Math.min(shown, total) - COVER_WORDS.length));
+
+  return (
+    <section className="cover" aria-label="Cover">
+      <p className="cover-kicker">Interactive lecture</p>
+      <h1>How a transformer predicts the next word</h1>
+      <p className="cover-words" aria-label={`${COVER_WORDS.join(" ")} ${COVER_GUESS}`}>
+        {COVER_WORDS.slice(0, words).map((word, i) => (
+          <span key={i} className="word-box">
+            {word}
+          </span>
+        ))}
+        {words === COVER_WORDS.length && (
+          <span className="cover-typed">
+            {typed}
+            <i aria-hidden />
+          </span>
+        )}
+      </p>
+      <p className="cover-byline">
+        Tokens, embeddings, layer norm, attention and the MLP, one small step at a time.{" "}
+        <button type="button" onClick={onStart}>
+          Begin →
+        </button>
+      </p>
+    </section>
+  );
+}
+
 function Explainer({
+  kicker,
   prompt,
   steps,
   step,
   setStep,
 }: {
+  kicker: string;
   prompt?: string;
   steps: Guide["steps"];
   step: number;
@@ -293,9 +379,11 @@ function Explainer({
     <section className="explainer" aria-label="Explanation">
       <div className={prompt ? "flip" : "flip over"}>
         <div className="face front" inert={!prompt}>
+          <p className="explainer-kicker">{kicker}</p>
           <p>{prompt}</p>
         </div>
         <div className="face back" inert={Boolean(prompt)}>
+          <p className="explainer-kicker">{kicker}</p>
           <p className="explainer-text" aria-live="polite">
             {steps[current].text}
           </p>
